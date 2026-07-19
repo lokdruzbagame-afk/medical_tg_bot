@@ -194,6 +194,15 @@ def save_template(day_type: str, parsed_entries: list):
     conn.commit()
     conn.close()
 
+def clear_template(day_type: str):
+    """Видалити шаблон для певного типу дня."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM templates WHERE day_type = ? ", (day_type,))
+    conn.commit()
+    conn.close()
+
+
 def apply_template_to_active(day_type: str):
     """Скопіювати шаблон в активний графік."""
     conn = sqlite3.connect(DB_PATH)

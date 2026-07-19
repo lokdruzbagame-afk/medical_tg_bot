@@ -661,11 +661,68 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔄 Запустити Парний день", callback_data="admin_run_tpl:even")],
             [InlineKeyboardButton("🔄 Запустити Непарний день", callback_data="admin_run_tpl:odd")],
             [InlineKeyboardButton("✏️ Редагувати сьогоднішній графік", callback_data="admin_edit_sched_list")],
+            [InlineKeyboardButton("❌ Очистити сьогоднішній графік", callback_data="admin_clear_sched_confirm")],
+            [InlineKeyboardButton("❌ Видалити шаблон (Парні)", callback_data="admin_clear_tpl_confirm:even"),
+             InlineKeyboardButton("❌ Видалити шаблон (Непарні)", callback_data="admin_clear_tpl_confirm:odd")],
             [InlineKeyboardButton("« Назад", callback_data="admin_menu")]
         ]
         await query.edit_message_text(
             "📅 <b>Керування графіками процедур</b>\n\n"
             "Тут ви можете завантажити шаблони для парних та непарних днів, застосувати їх до сьогоднішнього активного графіка або точково змінити окремі записи.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        return
+
+    elif data == "admin_clear_sched_confirm":
+        keyboard = [
+            [
+                InlineKeyboardButton("Так, очистити графік", callback_data="admin_clear_sched_execute"),
+                InlineKeyboardButton("Скасувати", callback_data="admin_sched_mgmt")
+            ]
+        ]
+        await query.edit_message_text(
+            "⚠️ <b>Попередження!</b>\n\nВи впевнені, що хочете повністю очистити сьогоднішній активний графік? "
+            "Цю дію не можна буде скасувати.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        return
+
+    elif data == "admin_clear_sched_execute":
+        db.clear_schedules()
+        keyboard = [[InlineKeyboardButton("« Назад до керування", callback_data="admin_sched_mgmt")]]
+        await query.edit_message_text(
+            "❌ <b>Сьогоднішній графік успішно очищено!</b>",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        return
+
+    elif data.startswith("admin_clear_tpl_confirm:"):
+        day_type = data.split(":")[1]
+        day_name = "ПАРНИХ" if day_type == "even" else "НЕПАРНИХ"
+        keyboard = [
+            [
+                InlineKeyboardButton("Так, видалити", callback_data=f"admin_clear_tpl_execute:{day_type}"),
+                InlineKeyboardButton("Скасувати", callback_data="admin_sched_mgmt")
+            ]
+        ]
+        await query.edit_message_text(
+            f"⚠️ <b>Попередження!</b>\n\nВи впевнені, що хочете видалити шаблон для <b>{day_name}</b> днів? "
+            f"Всі збережені записи для цього шаблону будуть стерті.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        return
+
+    elif data.startswith("admin_clear_tpl_execute:"):
+        day_type = data.split(":")[1]
+        db.clear_template(day_type)
+        day_name = "ПАРНИХ" if day_type == "even" else "НЕПАРНИХ"
+        keyboard = [[InlineKeyboardButton("« Назад до керування", callback_data="admin_sched_mgmt")]]
+        await query.edit_message_text(
+            f"❌ <b>Шаблон для {day_name} днів успішно видалено!</b>",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
         )
