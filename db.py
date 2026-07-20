@@ -268,3 +268,30 @@ def get_active_entries_by_procedure(procedure_name: str):
     rows = cursor.fetchall()
     conn.close()
     return [{"id": r[0], "group_number": r[1], "time_slot": r[2]} for r in rows]
+
+def has_template_entries(day_type: str) -> bool:
+    """Перевірити, чи є записи в шаблоні для певного типу дня."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM templates WHERE day_type = ?", (day_type,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count > 0
+
+def get_all_schedules():
+    """Отримати весь графік процедур на сьогодні."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT procedure_name, group_number, time_slot FROM schedules ORDER BY group_number, time_slot")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_template_groups(day_type: str) -> list:
+    """Отримати унікальні номери груп для певного шаблону."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT group_number FROM templates WHERE day_type = ?", (day_type,))
+    groups = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return groups

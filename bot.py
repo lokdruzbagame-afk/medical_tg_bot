@@ -2,7 +2,11 @@ from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKe
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import db
 import os
+import re
+import sqlite3
+import datetime
 from dotenv import load_dotenv
+from tzlocal import get_localzone
 
 # Завантаження конфігурації
 load_dotenv()
@@ -33,9 +37,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_id == ADMIN_ID:
         keyboard = [
-            ["📅 Графік", "ℹ️ Інформація"],
+            ["📅 Графік", "📅 Актуальний графік на сьогодні"],
             ["📢 Виклик групи", "📊 Статус груп"],
-            ["⚙️ Адмін-панель"]
+            ["ℹ️ Інформація", "⚙️ Адмін-панель"]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
@@ -199,7 +203,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Очікування завантаження графіка адміністратором
     if user_id == ADMIN_ID and context.user_data.get('waiting_for_schedule'):
         context.user_data['waiting_for_schedule'] = False
-        import re
         lines = text.split("\n")
         current_procedure = None
         parsed_entries = []
@@ -259,7 +262,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id == ADMIN_ID and context.user_data.get('waiting_for_template'):
         day_type = context.user_data['waiting_for_template']
         context.user_data['waiting_for_template'] = None
-        import re
         lines = text.split("\n")
         current_procedure = None
         parsed_entries = []
@@ -403,7 +405,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(info_text, parse_mode="HTML")
             return
 
-    if text == "📅 Графік":
+    if text in ["📅 Графік", "📅 Актуальний графік на сьогодні"]:
         if user_id == ADMIN_ID or user:
             group_num = None if user_id == ADMIN_ID else user["group_number"]
             if group_num:
@@ -420,12 +422,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         msg += f"🔹 <b>{item['procedure_name']}:</b> {item['time_slot']}\n"
                     await update.message.reply_text(msg, parse_mode="HTML")
             else:
-                import sqlite3
-                conn = sqlite3.connect(db.DB_PATH)
-                cursor = conn.cursor()
-                cursor.execute("SELECT procedure_name, group_number, time_slot FROM schedules ORDER BY group_number, time_slot")
-                all_sched = cursor.fetchall()
-                conn.close()
+                all_sched = db.get_all_schedules()
                 
                 if not all_sched:
                     await update.message.reply_text("📅 Графік процедур порожній.", parse_mode="HTML")
@@ -753,12 +750,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.apply_template_to_active(day_type)
         
         # Надсилаємо графіки усім групам
-        import sqlite3
-        conn = sqlite3.connect(db.DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT group_number FROM templates WHERE day_type = ?", (day_type,))
-        active_groups = [r[0] for r in cursor.fetchall()]
-        conn.close()
+        active_groups = db.get_template_groups(day_type)
         for g in active_groups:
             await notify_group_about_schedule(context, g)
             
@@ -1063,11 +1055,56 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
+async def daily_check_job(context: ContextTypes.DEFAULT_TYPE):
+    """Щоденна перевірка о 8:10 наявності графіка на сьогодні."""
+    today = datetime.date.today()
+    day_type = "even" if today.day % 2 == 0 else "odd"
+    day_name = "ПАРНИЙ" if day_type == "even" else "НЕПАРНИЙ"
+    
+    if not db.has_template_entries(day_type):
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"⚠️ <b>Увага!</b> Шаблон для <b>{day_name}</b> дня порожній або відсутній.\n\n"
+                    f"Графік на сьогодні не буде надіслано групам о 8:15. Будь ласка, завантажте графік або шаблон!"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            print(f"Error sending warning to admin: {e}")
+
+async def daily_schedule_job(context: ContextTypes.DEFAULT_TYPE):
+    """Щоденний запуск о 8:15 для оновлення графіка та сповіщення груп."""
+    today = datetime.date.today()
+    day_type = "even" if today.day % 2 == 0 else "odd"
+    
+    if db.has_template_entries(day_type):
+        # Застосувати шаблон до активного графіка
+        db.apply_template_to_active(day_type)
+        
+        # Надіслати індивідуальні графіки вихователям кожної групи
+        for group_num in range(1, 9):
+            await notify_group_about_schedule(context, group_num)
+
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(admin_callback))
+
+# Додати щоденні завдання
+local_tz = get_localzone()
+
+app.job_queue.run_daily(
+    daily_check_job,
+    time=datetime.time(hour=8, minute=10, tzinfo=local_tz)
+)
+
+app.job_queue.run_daily(
+    daily_schedule_job,
+    time=datetime.time(hour=8, minute=15, tzinfo=local_tz)
+)
 
 print("Бот запущений...")
 app.run_polling()
